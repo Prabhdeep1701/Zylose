@@ -47,7 +47,7 @@ export default function Sidebar() {
               transition={{ duration: 0.2 }}
               className="overflow-hidden"
             >
-              <p className="font-bold text-base text-white leading-tight tracking-tight">SentinelAI</p>
+              <p className="font-bold text-base text-white leading-tight tracking-tight">Zylose</p>
               <p className="text-[10px] text-[#00FF9C] font-mono tracking-widest uppercase">Cyber Defense</p>
             </motion.div>
           )}

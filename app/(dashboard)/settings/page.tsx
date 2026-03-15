@@ -49,7 +49,7 @@ export default function SettingsPage() {
       >
         <div>
           <h1 className="text-2xl font-bold text-white">Platform <span className="gradient-text-green">Settings</span></h1>
-          <p className="text-sm text-[#64748B] mt-1">Configure your SentinelAI security platform</p>
+          <p className="text-sm text-[#64748B] mt-1">Configure your Zylose security platform</p>
         </div>
         <motion.button
           whileHover={{ scale: 1.02 }}

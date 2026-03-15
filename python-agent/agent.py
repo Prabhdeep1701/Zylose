@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SentinelAI Python Agent
+Zylose Python Agent
 =======================
 Collects system telemetry (CPU, Memory, Processes, Network)
-and sends it to the SentinelAI backend every N seconds.
+and sends it to the Zylose backend every N seconds.
 
 Run: python agent.py [--interval 5] [--endpoint http://localhost:3000]
 """
@@ -253,7 +253,7 @@ def send_log_entry(endpoint: str, level: str, service: str, message: str) -> Non
 # ──────────────────────────────────────────────────────────────
 
 def run(interval: int, endpoint: str) -> None:
-    log.info(f"SentinelAI Agent starting — ID: {AGENT_ID}")
+    log.info(f"Zylose Agent starting — ID: {AGENT_ID}")
     log.info(f"Backend: {endpoint} | Interval: {interval}s | Host: {HOSTNAME}")
 
     # Notify backend that agent has started
@@ -291,11 +291,11 @@ def run(interval: int, endpoint: str) -> None:
 # ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SentinelAI System Telemetry Agent")
+    parser = argparse.ArgumentParser(description="Zylose System Telemetry Agent")
     parser.add_argument("--interval", type=int,   default=5,
                         help="Collection interval in seconds (default: 5)")
     parser.add_argument("--endpoint", type=str,   default="http://localhost:3000",
-                        help="SentinelAI backend URL (default: http://localhost:3000)")
+                        help="Zylose backend URL (default: http://localhost:3000)")
     parser.add_argument("--dry-run",  action="store_true",
                         help="Collect and print one payload without sending")
     args = parser.parse_args()

@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "SentinelAI — Cybersecurity Monitoring Platform",
+  title: "Zylose — Cybersecurity Monitoring Platform",
   description: "AI-powered cybersecurity monitoring and threat detection platform",
 };
 

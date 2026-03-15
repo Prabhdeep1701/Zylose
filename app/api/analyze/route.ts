@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         analyzedAt: new Date().toISOString(),
         version: "1.0.0",
-        engine: "SentinelAI-DSA+ML",
+        engine: "Zylose-DSA+ML",
       },
     });
   } catch {

@@ -1,4 +1,4 @@
-// Mock data generators for SentinelAI dashboard
+// Mock data generators for Zylose dashboard
 
 export type Severity = "critical" | "high" | "medium" | "low";
 export type AlertStatus = "active" | "investigating" | "resolved" | "authorized";
