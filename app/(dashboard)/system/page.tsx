@@ -1,24 +1,45 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   RadialBarChart, RadialBar
 } from "recharts";
-import { Cpu, MemoryStick, HardDrive, Activity, RefreshCw, Filter } from "lucide-react";
+import { Cpu, Activity, RefreshCw, Filter } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import StatCard from "@/components/StatCard";
-import { generateSystemMetrics, generateProcesses } from "@/lib/mock-data";
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+type MetricPoint = { time: string; cpu: number; memory: number; disk: number };
+type ProcessRow = { pid: number; name: string; cpu: number; memory: number; status: "secure" | "warning" | "suspicious" };
+type AgentTelemetry = {
+  timestamp?: string;
+  cpu?: { usage_pct?: number };
+  memory?: { usage_pct?: number; used_gb?: number };
+  disk?: { usage_pct?: number };
+  processes?: Array<{ pid?: number; name?: string; cpu_pct?: number; memory_mb?: number }>;
+};
+
+interface TooltipPayloadItem {
+  name: string;
+  value: number;
+  color: string;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadItem[];
+  label?: string;
+}
+
+const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   if (!active || !payload?.length) return null;
   return (
     <div className="px-3 py-2 rounded-lg text-xs font-mono" style={{
       background: "rgba(8,12,20,0.95)", border: "1px solid rgba(0,255,156,0.3)",
     }}>
       <p className="text-[#64748B] mb-1">{label}</p>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <p key={p.name} style={{ color: p.color }}>{p.name}: <span className="font-bold">{p.value}%</span></p>
       ))}
     </div>
@@ -43,34 +64,62 @@ const GaugeChart = ({ value, color, label }: { value: number; color: string; lab
 };
 
 export default function SystemMonitorPage() {
-  const [metrics, setMetrics] = useState<ReturnType<typeof generateSystemMetrics>>([]);
-  const [processes, setProcesses] = useState<ReturnType<typeof generateProcesses>>([]);
+  const [metrics, setMetrics] = useState<MetricPoint[]>([]);
+  const [processes, setProcesses] = useState<ProcessRow[]>([]);
   const [filter, setFilter] = useState<"all" | "secure" | "warning" | "suspicious">("all");
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Initialise client-side only to avoid hydration mismatch
-  useEffect(() => {
-    setMetrics(generateSystemMetrics(30));
-    setProcesses(generateProcesses());
-  }, []);
+  const fetchSystemData = useCallback(async () => {
+    try {
+      const response = await fetch("/api/agent", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload: { data?: AgentTelemetry[] } = await response.json();
+      const telemetry = Array.isArray(payload.data) ? payload.data : [];
 
-  // Simulate real-time updates (client-only, after initial data is set)
-  useEffect(() => {
-    const id = setInterval(() => {
-      setMetrics(prev => {
-        if (prev.length === 0) return prev;
-        const now = new Date();
-        const newPoint = {
-          time: `${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`,
-          cpu: Math.round(20 + Math.random() * 60),
-          memory: Math.round(50 + Math.random() * 30),
-          disk: Math.round(38 + Math.random() * 8),
+      const nextMetrics = telemetry
+        .slice()
+        .reverse()
+        .slice(-30)
+        .map((entry) => {
+          const date = entry.timestamp ? new Date(entry.timestamp) : new Date();
+          return {
+            time: `${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`,
+            cpu: Math.round(entry.cpu?.usage_pct ?? 0),
+            memory: Math.round(entry.memory?.usage_pct ?? 0),
+            disk: Math.round(entry.disk?.usage_pct ?? 0),
+          };
+        });
+
+      const latest = telemetry[0];
+      const nextProcesses: ProcessRow[] = (latest?.processes ?? []).slice(0, 15).map((proc) => {
+        const cpu = proc.cpu_pct ?? 0;
+        return {
+          pid: proc.pid ?? 0,
+          name: proc.name ?? "unknown",
+          cpu,
+          memory: ((proc.memory_mb ?? 0) / 1024),
+          status: cpu > 70 ? "suspicious" : cpu > 35 ? "warning" : "secure",
         };
-        return [...prev.slice(-29), newPoint];
       });
-    }, 3000);
-    return () => clearInterval(id);
+
+      setMetrics(nextMetrics);
+      setProcesses(nextProcesses);
+    } catch {
+      // Keep last successful state when backend is temporarily unavailable.
+    }
   }, []);
+
+  useEffect(() => {
+    const initial = setTimeout(() => {
+      void fetchSystemData();
+    }, 0);
+    const id = setInterval(() => {
+      void fetchSystemData();
+    }, 3000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [fetchSystemData]);
 
   const latest = metrics[metrics.length - 1];
 

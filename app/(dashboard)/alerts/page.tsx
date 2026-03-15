@@ -4,11 +4,11 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Filter, Search, ChevronDown, ChevronUp, RefreshCw, Download,
-  AlertTriangle, Shield, Clock, Globe, ChevronRight
+  AlertTriangle, Shield, ChevronRight
 } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import SeverityBadge from "@/components/SeverityBadge";
-import { generateAlerts, type Alert } from "@/lib/mock-data";
+import { type Alert, type LogEntry } from "@/lib/mock-data";
 import { formatTimestamp } from "@/lib/utils";
 
 const SEVERITIES = ["all", "critical", "high", "medium", "low"] as const;
@@ -17,9 +17,67 @@ const STATUSES   = ["all", "active", "investigating", "resolved", "authorized"] 
 export default function AlertsPage() {
   const [allAlerts, setAllAlerts] = useState<Alert[]>([]);
 
-  useEffect(() => {
-    setAllAlerts(generateAlerts(30));
+  const mapLevelToSeverity = useCallback((level: LogEntry["level"]): Alert["severity"] => {
+    if (level === "CRITICAL" || level === "ERROR") return "critical";
+    if (level === "WARN") return "high";
+    if (level === "INFO") return "medium";
+    return "low";
   }, []);
+
+  const mapLevelToStatus = useCallback((level: LogEntry["level"]): Alert["status"] => {
+    if (level === "CRITICAL" || level === "ERROR") return "active";
+    if (level === "WARN") return "investigating";
+    if (level === "INFO") return "resolved";
+    return "authorized";
+  }, []);
+
+  const mapLevelToRisk = useCallback((level: LogEntry["level"]): number => {
+    if (level === "CRITICAL") return 95;
+    if (level === "ERROR") return 80;
+    if (level === "WARN") return 65;
+    if (level === "INFO") return 35;
+    return 20;
+  }, []);
+
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const response = await fetch("/api/logs?limit=300", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload: { logs?: LogEntry[] } = await response.json();
+      const logs = Array.isArray(payload.logs) ? payload.logs : [];
+
+      const mapped: Alert[] = logs.map((log) => ({
+        id: log.id,
+        timestamp: log.timestamp,
+        type: `${log.level} - ${log.service}`,
+        severity: mapLevelToSeverity(log.level),
+        sourceIp: log.ip ?? "0.0.0.0",
+        targetIp: "internal",
+        status: mapLevelToStatus(log.level),
+        description: log.message,
+        riskScore: mapLevelToRisk(log.level),
+        port: 443,
+        protocol: "HTTPS",
+      }));
+
+      setAllAlerts(mapped);
+    } catch {
+      // Keep last successful state when backend is temporarily unavailable.
+    }
+  }, [mapLevelToRisk, mapLevelToSeverity, mapLevelToStatus]);
+
+  useEffect(() => {
+    const initial = setTimeout(() => {
+      void fetchAlerts();
+    }, 0);
+    const id = setInterval(() => {
+      void fetchAlerts();
+    }, 3000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [fetchAlerts]);
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState<typeof SEVERITIES[number]>("all");
   const [status, setStatus]     = useState<typeof STATUSES[number]>("all");
@@ -87,7 +145,11 @@ export default function AlertsPage() {
           <motion.button whileHover={{ scale: 1.02 }} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[rgba(0,255,156,0.2)] text-[#00FF9C] text-sm hover:bg-[rgba(0,255,156,0.05)] transition-all">
             <Download className="w-4 h-4" /> Export
           </motion.button>
-          <motion.button whileHover={{ scale: 1.02 }} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-[#05070D] bg-[#00FF9C] hover:bg-[#00CC7A] transition-all glow-green-sm">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            onClick={() => void fetchAlerts()}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-[#05070D] bg-[#00FF9C] hover:bg-[#00CC7A] transition-all glow-green-sm"
+          >
             <RefreshCw className="w-4 h-4" /> Refresh
           </motion.button>
         </div>

@@ -1,17 +1,45 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
-import { Globe, Activity, Wifi, Shield, AlertTriangle, ChevronDown, Download } from "lucide-react";
+import { Activity, Wifi, Shield, AlertTriangle, Download } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import StatCard from "@/components/StatCard";
-import { generateGeoThreats, generateNetworkTraffic } from "@/lib/mock-data";
+
+type GeoThreat = { id: string; lat: number; lng: number; country: string; threats: number; severity: "critical" | "high" | "medium" | "low" };
+type TrafficPoint = { time: string; inbound: number; outbound: number; threats: number };
+type TrafficRow = { source: string; dest: string; port: number; bytes: string; protocol: string; status: "normal" | "suspicious" | "blocked"; country: string; flag: string };
+type AgentTelemetry = {
+  timestamp?: string;
+  riskScore?: number;
+  network?: {
+    bytes_recv?: number;
+    bytes_sent?: number;
+    active_connections?: number;
+    connections?: Array<{ laddr?: string; raddr?: string; type?: string }>;
+  };
+};
+
+function hashIpToCoords(ip: string): { lat: number; lng: number } {
+  let hash = 0;
+  for (const ch of ip) hash = ((hash << 5) - hash) + ch.charCodeAt(0);
+  const normalized = Math.abs(hash);
+  const lat = ((normalized % 14000) / 100) - 70;
+  const lng = (((Math.floor(normalized / 97)) % 34000) / 100) - 170;
+  return { lat, lng };
+}
+
+function parseEndpoint(endpoint: string | undefined): { ip: string; port: number } {
+  if (!endpoint) return { ip: "0.0.0.0", port: 0 };
+  const [ip, port] = endpoint.split(":");
+  return { ip: ip || "0.0.0.0", port: Number(port || 0) };
+}
 
 // Simple SVG world map visualization
-function WorldMapViz({ threats }: { threats: ReturnType<typeof generateGeoThreats> }) {
+function WorldMapViz({ threats }: { threats: GeoThreat[] }) {
   // Map lat/lng to SVG coordinates (simplified Mercator)
   const toSvg = (lat: number, lng: number) => ({
     x: ((lng + 180) / 360) * 800,
@@ -123,31 +151,92 @@ function WorldMapViz({ threats }: { threats: ReturnType<typeof generateGeoThreat
 }
 
 export default function NetworkActivityPage() {
-  const [threats, setThreats] = useState<ReturnType<typeof generateGeoThreats>>([]);
-  const [traffic, setTraffic] = useState<ReturnType<typeof generateNetworkTraffic>>([]);
+  const [threats, setThreats] = useState<GeoThreat[]>([]);
+  const [traffic, setTraffic] = useState<TrafficPoint[]>([]);
+  const [trafficRows, setTrafficRows] = useState<TrafficRow[]>([]);
   const [liveConnections, setLiveConnections] = useState(8492);
   const [selectedThreat, setSelectedThreat] = useState<string | null>(null);
 
-  useEffect(() => {
-    setThreats(generateGeoThreats());
-    setTraffic(generateNetworkTraffic(12));
+  const fetchNetworkData = useCallback(async () => {
+    try {
+      const response = await fetch("/api/agent", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload: { data?: AgentTelemetry[] } = await response.json();
+      const telemetry = Array.isArray(payload.data) ? payload.data : [];
+
+      const points: TrafficPoint[] = telemetry
+        .slice()
+        .reverse()
+        .slice(-12)
+        .map((entry) => {
+          const date = entry.timestamp ? new Date(entry.timestamp) : new Date();
+          return {
+            time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`,
+            inbound: Math.round((entry.network?.bytes_recv ?? 0) / 1024),
+            outbound: Math.round((entry.network?.bytes_sent ?? 0) / 1024),
+            threats: Math.round((entry.riskScore ?? 0) / 10),
+          };
+        });
+
+      const latest = telemetry[0];
+      setLiveConnections(latest?.network?.active_connections ?? 0);
+
+      const connections = latest?.network?.connections ?? [];
+      const rows: TrafficRow[] = connections.slice(0, 12).map((conn) => {
+        const source = parseEndpoint(conn.raddr);
+        const dest = parseEndpoint(conn.laddr);
+        const riskScore = latest?.riskScore ?? 0;
+        return {
+          source: source.ip,
+          dest: dest.ip,
+          port: source.port,
+          bytes: `${Math.max(0.1, ((latest?.network?.bytes_recv ?? 0) / 1024 / 1024 / Math.max(connections.length, 1))).toFixed(1)} MB`,
+          protocol: conn.type ?? "TCP",
+          status: riskScore > 80 ? "blocked" : riskScore > 50 ? "suspicious" : "normal",
+          country: "Unknown",
+          flag: "🏳",
+        };
+      });
+
+      const grouped = rows.reduce<Record<string, number>>((acc, row) => {
+        acc[row.source] = (acc[row.source] ?? 0) + 1;
+        return acc;
+      }, {});
+
+      const mappedThreats: GeoThreat[] = Object.entries(grouped).map(([ip, count], index) => {
+        const coords = hashIpToCoords(ip);
+        return {
+          id: String(index + 1),
+          country: ip,
+          lat: coords.lat,
+          lng: coords.lng,
+          threats: count,
+          severity: count >= 6 ? "critical" : count >= 4 ? "high" : count >= 2 ? "medium" : "low",
+        };
+      });
+
+      setTraffic(points);
+      setTrafficRows(rows);
+      setThreats(mappedThreats);
+    } catch {
+      // Keep last successful state when backend is temporarily unavailable.
+    }
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLiveConnections(prev => prev + Math.floor(Math.random() * 20 - 5));
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    const initial = setTimeout(() => {
+      void fetchNetworkData();
+    }, 0);
+    const id = setInterval(() => {
+      void fetchNetworkData();
+    }, 3000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [fetchNetworkData]);
 
-  const trafficLog = useMemo(() => [
-    { source: "45.33.32.156",   dest: "192.168.1.100", port: 443,  bytes: "2.4 MB", protocol: "HTTPS", status: "blocked",  country: "Russia",   flag: "🇷🇺" },
-    { source: "198.51.100.42",  dest: "192.168.1.102", port: 22,   bytes: "0.8 MB", protocol: "SSH",   status: "suspicious", country: "China",  flag: "🇨🇳" },
-    { source: "203.0.113.10",   dest: "192.168.1.105", port: 80,   bytes: "1.2 MB", protocol: "HTTP",  status: "normal",    country: "USA",    flag: "🇺🇸" },
-    { source: "185.220.101.34", dest: "192.168.1.101", port: 3306, bytes: "0.3 MB", protocol: "MySQL", status: "blocked",   country: "Germany", flag: "🇩🇪" },
-    { source: "91.108.4.148",   dest: "192.168.1.108", port: 443,  bytes: "5.1 MB", protocol: "TLS",   status: "suspicious", country: "Japan", flag: "🇯🇵" },
-    { source: "104.21.85.14",   dest: "192.168.1.200", port: 8080, bytes: "0.6 MB", protocol: "HTTP",  status: "normal",    country: "UK",     flag: "🇬🇧" },
-  ], []);
+  const trafficLog = useMemo(() => trafficRows, [trafficRows]);
 
   return (
     <div className="space-y-6">

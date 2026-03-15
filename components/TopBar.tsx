@@ -2,17 +2,74 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Search, Bell, Settings, User, Wifi, Shield } from "lucide-react";
+import { Search, Bell, Settings, User, Wifi } from "lucide-react";
+import { formatBytes } from "@/lib/utils";
+
+interface AgentSnapshot {
+  timestamp?: string;
+  network?: {
+    bytes_recv?: number;
+    bytes_sent?: number;
+  };
+}
 
 export default function TopBar() {
   const [time, setTime] = useState(new Date(0)); // epoch avoids SSR mismatch
   const [search, setSearch] = useState("");
+  const [networkSpeed, setNetworkSpeed] = useState("--");
 
   useEffect(() => {
-    // Set real time only on client
-    setTime(new Date());
+    const initial = setTimeout(() => {
+      setTime(new Date());
+    }, 0);
     const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const fetchThroughput = async () => {
+      try {
+        const response = await fetch("/api/agent", { cache: "no-store" });
+        if (!response.ok) return;
+
+        const payload: { data?: AgentSnapshot[] } = await response.json();
+        const data = Array.isArray(payload.data) ? payload.data : [];
+        if (data.length < 2) {
+          setNetworkSpeed("--");
+          return;
+        }
+
+        const latest = data[0];
+        const previous = data[1];
+
+        const latestTs = latest.timestamp ? new Date(latest.timestamp).getTime() : NaN;
+        const previousTs = previous.timestamp ? new Date(previous.timestamp).getTime() : NaN;
+        const deltaSeconds = Math.max((latestTs - previousTs) / 1000, 0.001);
+
+        const latestTotal = (latest.network?.bytes_recv ?? 0) + (latest.network?.bytes_sent ?? 0);
+        const previousTotal = (previous.network?.bytes_recv ?? 0) + (previous.network?.bytes_sent ?? 0);
+
+        const bytesPerSecond = Math.max((latestTotal - previousTotal) / deltaSeconds, 0);
+        setNetworkSpeed(formatBytes(bytesPerSecond));
+      } catch {
+        // Keep prior speed when telemetry endpoint is temporarily unavailable.
+      }
+    };
+
+    const initial = setTimeout(() => {
+      void fetchThroughput();
+    }, 0);
+    const id = setInterval(() => {
+      void fetchThroughput();
+    }, 3000);
+
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
   }, []);
 
   const timeStr = time.toLocaleTimeString("en-US", { hour12: false });
@@ -42,7 +99,7 @@ export default function TopBar() {
       {/* Network status */}
       <div className="hidden lg:flex items-center gap-1.5 text-[#94A3B8]">
         <Wifi className="w-4 h-4 text-[#00FF9C]" />
-        <span className="text-xs font-mono">4.2 TB/s</span>
+        <span className="text-xs font-mono">{networkSpeed}</span>
       </div>
 
       {/* Time */}

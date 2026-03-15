@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // In-memory log store (replace with Supabase in production)
-const logStore: object[] = [];
+interface LogStoreEntry {
+  id: string;
+  timestamp: string;
+  level: "INFO" | "WARN" | "ERROR" | "DEBUG" | "CRITICAL";
+  service: string;
+  message: string;
+  ip: unknown;
+  userId: unknown;
+  metadata: unknown;
+}
+
+const logStore: LogStoreEntry[] = [];
 
 // Schema validation for incoming logs
 function validateLogSchema(body: unknown): { valid: boolean; error?: string } {
@@ -42,8 +53,8 @@ export async function GET(request: NextRequest) {
 
   let data = [...logStore];
 
-  if (level)   data = data.filter((l: any) => l.level === level);
-  if (service) data = data.filter((l: any) => l.service === service);
+  if (level)   data = data.filter((l) => l.level === level);
+  if (service) data = data.filter((l) => l.service === service);
 
   return NextResponse.json({
     success: true,

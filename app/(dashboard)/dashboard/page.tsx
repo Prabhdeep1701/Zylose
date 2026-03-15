@@ -1,26 +1,42 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Line, AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 import {
-  Shield, Activity, AlertTriangle, Zap, TrendingUp,
-  Eye, Clock, Target, Globe
+  Shield, Activity, AlertTriangle, Eye, Target
 } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import GlassCard from "@/components/GlassCard";
 import SeverityBadge from "@/components/SeverityBadge";
-import {
-  generateAlerts, generateNetworkTraffic, generateHeatmapData,
-  type Alert
-} from "@/lib/mock-data";
+import { type Alert, type LogEntry } from "@/lib/mock-data";
 import { formatTimestamp } from "@/lib/utils";
 
+interface TooltipPayloadItem {
+  name: string;
+  value: number;
+  color: string;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadItem[];
+  label?: string;
+}
+
+interface ThreatNodeProps {
+  x: number;
+  y: number;
+  size: number;
+  label: string;
+  color: string;
+}
+
 // Custom tooltip for the charts
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   if (!active || !payload?.length) return null;
   return (
     <div className="px-3 py-2 rounded-lg text-xs font-mono" style={{
@@ -28,7 +44,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       border: "1px solid rgba(0,255,156,0.3)",
     }}>
       <p className="text-[#64748B] mb-1">{label}</p>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <p key={p.name} style={{ color: p.color }}>
           {p.name}: <span className="font-bold">{p.value}</span>
         </p>
@@ -37,7 +53,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-const ThreatNode = ({ x, y, size, label, color }: any) => (
+const ThreatNode = ({ x, y, size, label, color }: ThreatNodeProps) => (
   <motion.g>
     <motion.circle
       cx={x} cy={y} r={size}
@@ -52,24 +68,165 @@ const ThreatNode = ({ x, y, size, label, color }: any) => (
 );
 
 export default function DashboardPage() {
-  const [alerts, setAlerts]   = useState<Alert[]>([]);
-  const [traffic, setTraffic] = useState<ReturnType<typeof generateNetworkTraffic>>([]);
-  const [heatmap, setHeatmap] = useState<ReturnType<typeof generateHeatmapData>>([]);
-  const [mounted, setMounted] = useState(false);
+  type TrafficPoint = { time: string; inbound: number; outbound: number; threats: number };
+  type HeatmapRow = { region: string; low: number; medium: number; high: number; critical: number };
+  type DashboardSummary = {
+    totalThreatsNeutralized: number;
+    activeHighPriorityAlerts: number;
+    systemHealthScore: number;
+    threatsDetectedToday: number;
+    latestRiskScore: number;
+  };
 
-  useEffect(() => {
-    setAlerts(generateAlerts(8));
-    setTraffic(generateNetworkTraffic(20));
-    setHeatmap(generateHeatmapData());
-    setMounted(true);
+  const [alerts, setAlerts]   = useState<Alert[]>([]);
+  const [traffic, setTraffic] = useState<TrafficPoint[]>([]);
+  const [heatmap, setHeatmap] = useState<HeatmapRow[]>([]);
+  const [summary, setSummary] = useState<DashboardSummary>({
+    totalThreatsNeutralized: 0,
+    activeHighPriorityAlerts: 0,
+    systemHealthScore: 100,
+    threatsDetectedToday: 0,
+    latestRiskScore: 0,
+  });
+
+  const mapLevelToSeverity = (level: LogEntry["level"]): Alert["severity"] => {
+    if (level === "CRITICAL" || level === "ERROR") return "critical";
+    if (level === "WARN") return "high";
+    if (level === "INFO") return "medium";
+    return "low";
+  };
+
+  const mapLevelToStatus = (level: LogEntry["level"]): Alert["status"] => {
+    if (level === "CRITICAL" || level === "ERROR") return "active";
+    if (level === "WARN") return "investigating";
+    if (level === "INFO") return "resolved";
+    return "authorized";
+  };
+
+  const mapLevelToRisk = (level: LogEntry["level"]): number => {
+    if (level === "CRITICAL") return 95;
+    if (level === "ERROR") return 80;
+    if (level === "WARN") return 65;
+    if (level === "INFO") return 35;
+    return 20;
+  };
+
+  const fetchLiveData = useCallback(async () => {
+    try {
+      const [logsResponse, agentResponse] = await Promise.all([
+        fetch("/api/logs?limit=200", { cache: "no-store" }),
+        fetch("/api/agent", { cache: "no-store" }),
+      ]);
+
+      if (!logsResponse.ok || !agentResponse.ok) return;
+
+      const logsPayload: { logs?: LogEntry[] } = await logsResponse.json();
+      const agentPayload: { data?: Array<{ timestamp?: string; riskScore?: number; network?: { bytes_recv?: number; bytes_sent?: number } }> } = await agentResponse.json();
+
+      const logs = Array.isArray(logsPayload.logs) ? logsPayload.logs : [];
+      const telemetry = Array.isArray(agentPayload.data) ? agentPayload.data : [];
+
+      const incidentAlerts: Alert[] = logs.slice(0, 8).map((log) => ({
+        id: log.id,
+        timestamp: log.timestamp,
+        type: `${log.level} - ${log.service}`,
+        severity: mapLevelToSeverity(log.level),
+        sourceIp: log.ip ?? "0.0.0.0",
+        targetIp: "internal",
+        status: mapLevelToStatus(log.level),
+        description: log.message,
+        riskScore: mapLevelToRisk(log.level),
+        port: 443,
+        protocol: "HTTPS",
+      }));
+
+      const trafficPoints: TrafficPoint[] = telemetry
+        .slice()
+        .reverse()
+        .slice(-20)
+        .map((entry) => {
+          const date = entry.timestamp ? new Date(entry.timestamp) : new Date();
+          return {
+            time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`,
+            inbound: Math.round((entry.network?.bytes_recv ?? 0) / 1024),
+            outbound: Math.round((entry.network?.bytes_sent ?? 0) / 1024),
+            threats: Math.max(0, Math.round((entry.riskScore ?? 0) / 10)),
+          };
+        });
+
+      const groupedByService = logs.reduce<Record<string, HeatmapRow>>((acc, log) => {
+        const key = log.service || "Unknown";
+        if (!acc[key]) {
+          acc[key] = { region: key, low: 0, medium: 0, high: 0, critical: 0 };
+        }
+
+        const severity = mapLevelToSeverity(log.level);
+        if (severity === "critical") acc[key].critical += 1;
+        if (severity === "high") acc[key].high += 1;
+        if (severity === "medium") acc[key].medium += 1;
+        if (severity === "low") acc[key].low += 1;
+        return acc;
+      }, {});
+
+      const heatmapRows = Object.values(groupedByService)
+        .sort((a, b) => (b.critical + b.high + b.medium + b.low) - (a.critical + a.high + a.medium + a.low))
+        .slice(0, 6);
+
+      const today = new Date();
+      const sameDay = (iso: string) => {
+        const d = new Date(iso);
+        return d.getFullYear() === today.getFullYear()
+          && d.getMonth() === today.getMonth()
+          && d.getDate() === today.getDate();
+      };
+
+      const threatsToday = logs.filter((log) => sameDay(log.timestamp) && ["WARN", "ERROR", "CRITICAL"].includes(log.level)).length;
+      const activeHigh = logs.filter((log) => ["WARN", "ERROR", "CRITICAL"].includes(log.level)).length;
+      const neutralized = logs.filter((log) => ["INFO", "DEBUG"].includes(log.level)).length;
+      const latestRisk = telemetry[0]?.riskScore ?? 0;
+      const healthScore = Math.max(0, Math.min(100, Math.round(100 - latestRisk)));
+
+      setAlerts(incidentAlerts);
+      setTraffic(trafficPoints);
+      setHeatmap(heatmapRows);
+      setSummary({
+        totalThreatsNeutralized: neutralized,
+        activeHighPriorityAlerts: activeHigh,
+        systemHealthScore: healthScore,
+        threatsDetectedToday: threatsToday,
+        latestRiskScore: latestRisk,
+      });
+    } catch {
+      // Keep last successful state when backend is temporarily unavailable.
+    }
   }, []);
 
-  const pieData = [
-    { name: "Critical", value: 12, color: "#EF4444" },
-    { name: "High",     value: 18, color: "#F59E0B" },
-    { name: "Medium",   value: 24, color: "#3B82F6" },
-    { name: "Low",      value: 34, color: "#00FF9C" },
-  ];
+  useEffect(() => {
+    const initial = setTimeout(() => {
+      void fetchLiveData();
+    }, 0);
+    const id = setInterval(() => {
+      void fetchLiveData();
+    }, 3000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [fetchLiveData]);
+
+  const pieData = useMemo(() => {
+    const critical = alerts.filter((a) => a.severity === "critical").length;
+    const high = alerts.filter((a) => a.severity === "high").length;
+    const medium = alerts.filter((a) => a.severity === "medium").length;
+    const low = alerts.filter((a) => a.severity === "low").length;
+
+    return [
+      { name: "Critical", value: critical, color: "#EF4444" },
+      { name: "High", value: high, color: "#F59E0B" },
+      { name: "Medium", value: medium, color: "#3B82F6" },
+      { name: "Low", value: low, color: "#00FF9C" },
+    ];
+  }, [alerts]);
 
   return (
     <div className="space-y-6">
@@ -99,37 +256,37 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Total Threats Neutralized"
-          value="1,284"
-          subtext="-16% vs last week"
+          value={summary.totalThreatsNeutralized.toLocaleString()}
+          subtext="Derived from INFO/DEBUG remediation logs"
           icon={<Shield className="w-4 h-4" />}
-          trend={{ value: "-16%", positive: true }}
+          trend={{ value: `${summary.totalThreatsNeutralized}`, positive: true }}
           color="green"
           delay={0}
         />
         <StatCard
           title="Active High-Priority Alerts"
-          value="42"
-          subtext="-6% threat reduction"
+          value={summary.activeHighPriorityAlerts.toLocaleString()}
+          subtext="WARN/ERROR/CRITICAL in current feed"
           icon={<AlertTriangle className="w-4 h-4" />}
-          trend={{ value: "+3", positive: false }}
+          trend={{ value: `${summary.activeHighPriorityAlerts}`, positive: false }}
           color="red"
           delay={0.1}
         />
         <StatCard
           title="System Health Score"
-          value="98%"
-          subtext="Above normal integrity"
+          value={`${summary.systemHealthScore}%`}
+          subtext={`Based on live risk score: ${summary.latestRiskScore}`}
           icon={<Activity className="w-4 h-4" />}
-          trend={{ value: "+2%", positive: true }}
+          trend={{ value: `${summary.systemHealthScore}%`, positive: summary.systemHealthScore >= 70 }}
           color="blue"
           delay={0.2}
         />
         <StatCard
           title="Threats Detected Today"
-          value="1,204"
-          subtext="Response: 98.2% integrity"
+          value={summary.threatsDetectedToday.toLocaleString()}
+          subtext="Today only (WARN/ERROR/CRITICAL)"
           icon={<Target className="w-4 h-4" />}
-          trend={{ value: "+48", positive: false }}
+          trend={{ value: `${summary.threatsDetectedToday}`, positive: false }}
           color="purple"
           delay={0.3}
         />

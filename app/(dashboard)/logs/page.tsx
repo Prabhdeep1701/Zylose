@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Filter, Download, RefreshCw, ChevronDown, Terminal } from "lucide-react";
+import { Search, Download, RefreshCw, ChevronDown, Terminal } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
-import { generateLogs, type LogEntry } from "@/lib/mock-data";
+import { type LogEntry } from "@/lib/mock-data";
 
-const LOG_LEVELS = ["ALL", "INFO", "WARN", "ERROR", "DEBUG", "CRITICAL"] as const;
 const LEVEL_COLORS: Record<string, string> = {
   INFO:     "#00FF9C",
   WARN:     "#F59E0B",
@@ -25,15 +24,34 @@ const LEVEL_BG: Record<string, string> = {
 export default function LogsPage() {
   const [allLogs, setAllLogs] = useState<LogEntry[]>([]);
   const [search, setSearch]       = useState("");
-  const [level, setLevel]         = useState<typeof LOG_LEVELS[number]>("ALL");
+  const [level, setLevel]         = useState<"ALL" | LogEntry["level"]>("ALL");
   const [service, setService]     = useState("ALL");
   const [viewMode, setViewMode]   = useState<"table" | "terminal">("table");
-  const [showFilters, setShowFilters] = useState(true);
   const terminalRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setAllLogs(generateLogs(60));
+  const fetchLogs = useCallback(async () => {
+    try {
+      const response = await fetch("/api/logs?limit=300", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload: { logs?: LogEntry[] } = await response.json();
+      setAllLogs(Array.isArray(payload.logs) ? payload.logs : []);
+    } catch {
+      // Keep last successful state when backend is temporarily unavailable.
+    }
   }, []);
+
+  useEffect(() => {
+    const initial = setTimeout(() => {
+      void fetchLogs();
+    }, 0);
+    const id = setInterval(() => {
+      void fetchLogs();
+    }, 3000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [fetchLogs]);
 
   const services = useMemo(() => ["ALL", ...Array.from(new Set(allLogs.map(l => l.service)))], [allLogs]);
 
@@ -99,7 +117,10 @@ export default function LogsPage() {
           <button className="flex items-center gap-2 px-3 py-2 text-sm border border-[rgba(0,255,156,0.2)] text-[#00FF9C] rounded-lg hover:bg-[rgba(0,255,156,0.05)] transition-all font-mono">
             <Download className="w-4 h-4" /> Export
           </button>
-          <button className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-[#05070D] bg-[#00FF9C] hover:bg-[#00CC7A] rounded-lg transition-all glow-green-sm">
+          <button
+            onClick={() => void fetchLogs()}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-[#05070D] bg-[#00FF9C] hover:bg-[#00CC7A] rounded-lg transition-all glow-green-sm"
+          >
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
         </div>
