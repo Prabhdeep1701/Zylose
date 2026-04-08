@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import BootSequence from "@/components/BootSequence";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -17,7 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${inter.variable} antialiased bg-[#05070D] text-[#E2E8F0]`}>
-        {children}
+        <BootSequence>{children}</BootSequence>
       </body>
     </html>
   );

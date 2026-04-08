@@ -187,3 +187,259 @@ body {
   background: rgba(0, 255, 156, 0.2);
   color: #00FF9C;
 }
+
+/* Boot loading sequence */
+.boot-overlay {
+  background:
+    radial-gradient(circle at 50% 35%, rgba(0, 255, 156, 0.1), transparent 40%),
+    linear-gradient(180deg, #02060b 0%, #030810 45%, #02060b 100%);
+}
+
+.boot-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(0, 255, 156, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 156, 0.05) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.boot-scanline {
+  position: absolute;
+  inset: -200px 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 255, 156, 0.06) 40%, transparent 80%);
+  animation: boot-scan 3.5s linear infinite;
+}
+
+.boot-center {
+  position: absolute;
+  left: 50%;
+  top: 49%;
+  transform: translate(-50%, -50%);
+  width: min(740px, calc(100vw - 48px));
+  text-align: center;
+}
+
+.boot-core-wrap {
+  position: relative;
+  width: 230px;
+  height: 230px;
+  margin: 0 auto 28px;
+}
+
+.boot-block {
+  position: absolute;
+  inset: 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 255, 156, 0.32);
+  box-shadow: 0 0 18px rgba(0, 255, 156, 0.16);
+}
+
+.block-a {
+  animation: boot-rotate-a 4.8s linear infinite;
+}
+
+.block-b {
+  inset: 36px;
+  opacity: 0.8;
+  animation: boot-rotate-b 6.2s linear infinite;
+}
+
+.boot-core {
+  position: absolute;
+  inset: 67px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(0, 255, 156, 0.25);
+  display: grid;
+  place-items: center;
+  box-shadow:
+    inset 0 0 28px rgba(0, 255, 156, 0.09),
+    0 0 20px rgba(0, 255, 156, 0.12);
+}
+
+.boot-core-inner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(0, 255, 156, 0.95) 12%, rgba(0, 255, 156, 0.55) 42%, transparent 72%),
+    repeating-conic-gradient(from 0deg, rgba(0, 255, 156, 0.4) 0deg 16deg, transparent 16deg 32deg);
+  box-shadow: 0 0 18px rgba(0, 255, 156, 0.7);
+  animation: boot-pulse 1.6s ease-in-out infinite;
+}
+
+.boot-title {
+  font-size: clamp(16px, 2vw, 28px);
+  letter-spacing: 0.34em;
+  color: #00ff9c;
+  text-shadow: 0 0 14px rgba(0, 255, 156, 0.48);
+  margin-bottom: 10px;
+}
+
+.boot-subtitle {
+  font-family: var(--font-inter), monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: rgba(148, 163, 184, 0.78);
+  margin-bottom: 36px;
+}
+
+.boot-progress-wrap {
+  margin: 0 auto;
+  width: min(430px, calc(100vw - 80px));
+}
+
+.boot-progress-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 9px;
+  color: #00ff9c;
+  font-family: var(--font-inter), monospace;
+  letter-spacing: 0.1em;
+  font-size: 12px;
+}
+
+.boot-progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(8, 12, 20, 0.95);
+  border: 1px solid rgba(0, 255, 156, 0.3);
+  overflow: hidden;
+}
+
+.boot-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00ff9c 0%, #22c55e 100%);
+  box-shadow: 0 0 10px rgba(0, 255, 156, 0.8);
+  transition: width 200ms ease;
+}
+
+.boot-log-panel {
+  position: absolute;
+  left: clamp(10px, 5vw, 42px);
+  bottom: clamp(24px, 6vh, 50px);
+  width: min(290px, calc(100vw - 140px));
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 255, 156, 0.2);
+  background: rgba(2, 8, 16, 0.66);
+  box-shadow: inset 0 0 20px rgba(0, 255, 156, 0.08);
+}
+
+.boot-log-title {
+  margin-bottom: 9px;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  color: rgba(100, 116, 139, 0.95);
+  font-family: var(--font-inter), monospace;
+}
+
+.boot-log-line {
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  color: rgba(0, 255, 156, 0.9);
+  font-family: var(--font-inter), monospace;
+  line-height: 1.45;
+}
+
+.boot-log-foot {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #00ff9c;
+  letter-spacing: 0.1em;
+  font-family: var(--font-inter), monospace;
+  font-weight: 600;
+}
+
+.boot-signal-panel {
+  position: absolute;
+  right: clamp(14px, 5vw, 42px);
+  bottom: clamp(24px, 6vh, 50px);
+  width: 120px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 255, 156, 0.2);
+  background: rgba(2, 8, 16, 0.6);
+}
+
+.boot-signal-visual {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 7px;
+  border: 1px solid rgba(0, 255, 156, 0.2);
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.2), transparent 40%),
+    radial-gradient(circle at 55% 40%, rgba(0, 255, 156, 0.24), transparent 68%),
+    #040915;
+  margin-bottom: 9px;
+}
+
+.boot-signal-label {
+  font-size: 8px;
+  color: rgba(100, 116, 139, 0.9);
+  letter-spacing: 0.13em;
+  margin-bottom: 7px;
+  font-family: var(--font-inter), monospace;
+}
+
+.boot-bars {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.boot-bar {
+  width: 4px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(100, 116, 139, 0.45);
+}
+
+.boot-bar.on {
+  background: #00ff9c;
+  box-shadow: 0 0 8px rgba(0, 255, 156, 0.7);
+}
+
+@keyframes boot-rotate-a {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.02); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes boot-rotate-b {
+  0% { transform: rotate(12deg); }
+  50% { transform: rotate(-168deg); }
+  100% { transform: rotate(-348deg); }
+}
+
+@keyframes boot-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
+@keyframes boot-scan {
+  0% { transform: translateY(-65%); }
+  100% { transform: translateY(65%); }
+}
+
+@media (max-width: 860px) {
+  .boot-log-panel,
+  .boot-signal-panel {
+    display: none;
+  }
+
+  .boot-core-wrap {
+    width: 200px;
+    height: 200px;
+    margin-bottom: 20px;
+  }
+
+  .boot-title {
+    letter-spacing: 0.2em;
+  }
+}

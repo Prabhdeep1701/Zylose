@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -10,10 +10,11 @@ import {
   Zap, AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { type LogEntry } from "@/lib/mock-data";
 
 const navItems = [
   { href: "/dashboard",        label: "Dashboard",       icon: LayoutDashboard },
-  { href: "/alerts",           label: "Alerts",          icon: Bell,       badge: 42 },
+  { href: "/alerts",           label: "Alerts",          icon: Bell },
   { href: "/system",           label: "System Monitor",  icon: Monitor },
   { href: "/network",          label: "Network Activity", icon: Network },
   { href: "/logs",             label: "Logs",            icon: FileText },
@@ -23,6 +24,52 @@ const navItems = [
 export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [activeThreats, setActiveThreats] = useState(0);
+  const [lastHourDelta, setLastHourDelta] = useState(0);
+
+  const fetchThreatSummary = useCallback(async () => {
+    try {
+      const response = await fetch("/api/logs?limit=500", { cache: "no-store" });
+      if (!response.ok) return;
+
+      const payload: { logs?: LogEntry[] } = await response.json();
+      const logs = Array.isArray(payload.logs) ? payload.logs : [];
+
+      const isActiveThreat = (level: LogEntry["level"]) => level === "CRITICAL" || level === "ERROR";
+
+      const activeCount = logs.filter((log) => isActiveThreat(log.level)).length;
+
+      const now = Date.now();
+      const oneHourMs = 60 * 60 * 1000;
+      const currentHour = logs.filter((log) => {
+        const ts = new Date(log.timestamp).getTime();
+        return isActiveThreat(log.level) && ts >= now - oneHourMs;
+      }).length;
+      const previousHour = logs.filter((log) => {
+        const ts = new Date(log.timestamp).getTime();
+        return isActiveThreat(log.level) && ts >= now - 2 * oneHourMs && ts < now - oneHourMs;
+      }).length;
+
+      setActiveThreats(activeCount);
+      setLastHourDelta(currentHour - previousHour);
+    } catch {
+      // Keep last successful values when backend is temporarily unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    const initial = setTimeout(() => {
+      void fetchThreatSummary();
+    }, 0);
+    const id = setInterval(() => {
+      void fetchThreatSummary();
+    }, 3000);
+
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, [fetchThreatSummary]);
 
   return (
     <motion.aside
@@ -79,8 +126,9 @@ export default function Sidebar() {
 
       {/* Nav items */}
       <nav className="flex-1 px-2 pt-4 space-y-1 overflow-y-auto">
-        {navItems.map(({ href, label, icon: Icon, badge }) => {
+        {navItems.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
+          const badge = href === "/alerts" ? activeThreats : undefined;
           return (
             <Link key={href} href={href}>
               <motion.div
@@ -114,7 +162,7 @@ export default function Sidebar() {
                     </motion.span>
                   )}
                 </AnimatePresence>
-                {badge && !collapsed && (
+                {badge !== undefined && !collapsed && (
                   <span className="ml-auto flex-shrink-0 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-[rgba(239,68,68,0.15)] border border-[rgba(239,68,68,0.4)] text-[#EF4444]">
                     {badge}
                   </span>
@@ -138,8 +186,10 @@ export default function Sidebar() {
               <AlertTriangle className="w-3.5 h-3.5 text-[#EF4444]" />
               <span className="text-[10px] font-semibold text-[#EF4444] uppercase tracking-wider">Active Threats</span>
             </div>
-            <p className="text-2xl font-bold text-[#EF4444] glow-text-red">42</p>
-            <p className="text-[10px] text-[#94A3B8] mt-0.5">↑ 8 in last hour</p>
+            <p className="text-2xl font-bold text-[#EF4444] glow-text-red">{activeThreats}</p>
+            <p className="text-[10px] text-[#94A3B8] mt-0.5">
+              {lastHourDelta >= 0 ? "↑" : "↓"} {Math.abs(lastHourDelta)} in last hour
+            </p>
           </motion.div>
         )}
       </AnimatePresence>

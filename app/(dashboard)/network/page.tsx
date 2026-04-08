@@ -8,6 +8,7 @@ import {
 import { Activity, Wifi, Shield, AlertTriangle, Download } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import StatCard from "@/components/StatCard";
+import { type LogEntry } from "@/lib/mock-data";
 
 type GeoThreat = { id: string; lat: number; lng: number; country: string; threats: number; severity: "critical" | "high" | "medium" | "low" };
 type TrafficPoint = { time: string; inbound: number; outbound: number; threats: number };
@@ -19,8 +20,23 @@ type AgentTelemetry = {
     bytes_recv?: number;
     bytes_sent?: number;
     active_connections?: number;
+    packets_sent?: number;
+    packets_recv?: number;
+    err_in?: number;
+    err_out?: number;
+    drop_in?: number;
+    drop_out?: number;
     connections?: Array<{ laddr?: string; raddr?: string; type?: string }>;
   };
+};
+
+type LiveStats = {
+  blockedRequests: number;
+  blockedDelta: number;
+  criticalIncidents: number;
+  criticalDelta: number;
+  responseIntegrity: number;
+  responseIntegrityDelta: number;
 };
 
 function hashIpToCoords(ip: string): { lat: number; lng: number } {
@@ -154,15 +170,31 @@ export default function NetworkActivityPage() {
   const [threats, setThreats] = useState<GeoThreat[]>([]);
   const [traffic, setTraffic] = useState<TrafficPoint[]>([]);
   const [trafficRows, setTrafficRows] = useState<TrafficRow[]>([]);
-  const [liveConnections, setLiveConnections] = useState(8492);
+  const [liveConnections, setLiveConnections] = useState(0);
   const [selectedThreat, setSelectedThreat] = useState<string | null>(null);
+  const [liveStats, setLiveStats] = useState<LiveStats>({
+    blockedRequests: 0,
+    blockedDelta: 0,
+    criticalIncidents: 0,
+    criticalDelta: 0,
+    responseIntegrity: 100,
+    responseIntegrityDelta: 0,
+  });
 
   const fetchNetworkData = useCallback(async () => {
     try {
-      const response = await fetch("/api/agent", { cache: "no-store" });
-      if (!response.ok) return;
-      const payload: { data?: AgentTelemetry[] } = await response.json();
-      const telemetry = Array.isArray(payload.data) ? payload.data : [];
+      const [agentResponse, logsResponse] = await Promise.all([
+        fetch("/api/agent", { cache: "no-store" }),
+        fetch("/api/logs?limit=500", { cache: "no-store" }),
+      ]);
+
+      if (!agentResponse.ok || !logsResponse.ok) return;
+
+      const agentPayload: { data?: AgentTelemetry[] } = await agentResponse.json();
+      const logsPayload: { logs?: LogEntry[] } = await logsResponse.json();
+
+      const telemetry = Array.isArray(agentPayload.data) ? agentPayload.data : [];
+      const logs = Array.isArray(logsPayload.logs) ? logsPayload.logs : [];
 
       const points: TrafficPoint[] = telemetry
         .slice()
@@ -179,7 +211,44 @@ export default function NetworkActivityPage() {
         });
 
       const latest = telemetry[0];
+      const previous = telemetry[1];
       setLiveConnections(latest?.network?.active_connections ?? 0);
+
+      const blockedRequests = (latest?.network?.drop_in ?? 0) + (latest?.network?.drop_out ?? 0);
+      const previousBlocked = (previous?.network?.drop_in ?? 0) + (previous?.network?.drop_out ?? 0);
+      const blockedDelta = blockedRequests - previousBlocked;
+
+      const now = Date.now();
+      const oneHourMs = 60 * 60 * 1000;
+      const criticalCurrentHour = logs.filter((log) => {
+        const ts = new Date(log.timestamp).getTime();
+        return ["CRITICAL", "ERROR"].includes(log.level) && ts >= now - oneHourMs;
+      }).length;
+      const criticalPreviousHour = logs.filter((log) => {
+        const ts = new Date(log.timestamp).getTime();
+        return ["CRITICAL", "ERROR"].includes(log.level) && ts >= now - 2 * oneHourMs && ts < now - oneHourMs;
+      }).length;
+
+      const toIntegrity = (entry?: AgentTelemetry) => {
+        const packets = (entry?.network?.packets_recv ?? 0) + (entry?.network?.packets_sent ?? 0);
+        const issues = (entry?.network?.err_in ?? 0) + (entry?.network?.err_out ?? 0)
+          + (entry?.network?.drop_in ?? 0) + (entry?.network?.drop_out ?? 0);
+
+        if (packets <= 0) return 100;
+        return Math.max(0, Math.min(100, 100 - (issues / packets) * 100));
+      };
+
+      const responseIntegrity = toIntegrity(latest);
+      const previousIntegrity = toIntegrity(previous);
+
+      setLiveStats({
+        blockedRequests,
+        blockedDelta,
+        criticalIncidents: criticalCurrentHour,
+        criticalDelta: criticalCurrentHour - criticalPreviousHour,
+        responseIntegrity,
+        responseIntegrityDelta: responseIntegrity - previousIntegrity,
+      });
 
       const connections = latest?.network?.connections ?? [];
       const rows: TrafficRow[] = connections.slice(0, 12).map((conn) => {
@@ -237,6 +306,9 @@ export default function NetworkActivityPage() {
   }, [fetchNetworkData]);
 
   const trafficLog = useMemo(() => trafficRows, [trafficRows]);
+  const blockedTrend = `${liveStats.blockedDelta >= 0 ? "+" : ""}${liveStats.blockedDelta}`;
+  const criticalTrend = `${liveStats.criticalDelta >= 0 ? "+" : ""}${liveStats.criticalDelta}`;
+  const integrityTrend = `${liveStats.responseIntegrityDelta >= 0 ? "+" : ""}${liveStats.responseIntegrityDelta.toFixed(1)}%`;
 
   return (
     <div className="space-y-6">
@@ -262,9 +334,30 @@ export default function NetworkActivityPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Total Connections"     value={liveConnections.toLocaleString()} icon={<Wifi className="w-4 h-4" />}        trend={{ value: "+450", positive: false }} color="green"  delay={0} />
-        <StatCard title="Blocked Requests"      value="450"   icon={<Shield className="w-4 h-4" />}       trend={{ value: "-12", positive: true }}  color="blue"   delay={0.1} />
-        <StatCard title="Critical Incidents"    value="14"    icon={<AlertTriangle className="w-4 h-4" />} trend={{ value: "+2",  positive: false }} color="red"    delay={0.2} />
-        <StatCard title="Response Integrity"    value="98.2%" icon={<Activity className="w-4 h-4" />}      trend={{ value: "+0.1%", positive: true }} color="purple" delay={0.3} />
+        <StatCard
+          title="Blocked Requests"
+          value={liveStats.blockedRequests.toLocaleString()}
+          icon={<Shield className="w-4 h-4" />}
+          trend={{ value: blockedTrend, positive: liveStats.blockedDelta <= 0 }}
+          color="blue"
+          delay={0.1}
+        />
+        <StatCard
+          title="Critical Incidents"
+          value={liveStats.criticalIncidents.toLocaleString()}
+          icon={<AlertTriangle className="w-4 h-4" />}
+          trend={{ value: criticalTrend, positive: liveStats.criticalDelta <= 0 }}
+          color="red"
+          delay={0.2}
+        />
+        <StatCard
+          title="Response Integrity"
+          value={`${liveStats.responseIntegrity.toFixed(1)}%`}
+          icon={<Activity className="w-4 h-4" />}
+          trend={{ value: integrityTrend, positive: liveStats.responseIntegrityDelta >= 0 }}
+          color="purple"
+          delay={0.3}
+        />
       </div>
 
       {/* World Map + Sidebar */}
@@ -359,7 +452,7 @@ export default function NetworkActivityPage() {
         </GlassCard>
 
         {/* Live Traffic Log */}
-        <GlassCard title="Live New Traffic Log" subtitle="Real-time connection feed" delay={0.4} noPadding headerRight={
+        <GlassCard title="Live Traffic Log" subtitle="Real-time connection feed" delay={0.4} noPadding headerRight={
           <button className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-mono border border-[rgba(0,255,156,0.2)] text-[#00FF9C] rounded-lg hover:bg-[rgba(0,255,156,0.05)]">
             <Download className="w-3 h-3" /> Export
           </button>
