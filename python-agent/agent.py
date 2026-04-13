@@ -84,10 +84,11 @@ def collect_processes(top_n: int = 20) -> list:
     for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "status", "username"]):
         try:
             info = proc.info
+            cpu = info["cpu_percent"]
             procs.append({
                 "pid":        info["pid"],
                 "name":       info["name"],
-                "cpu_pct":    info["cpu_percent"],
+                "cpu_pct":    float(cpu) if cpu is not None else 0.0,
                 "memory_mb":  round(info["memory_info"].rss / 1024**2, 1) if info["memory_info"] else 0,
                 "status":     info["status"],
                 "username":   info.get("username", ""),
